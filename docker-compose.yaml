@@ -1,0 +1,58 @@
+version: '3.8'
+
+
+services:
+  weaviate:
+    image: semitechnologies/weaviate:1.23.8
+    restart: on-failure
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+
+    environment:
+      QUERY_DEFAULTS_LIMIT: 20
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
+      PERSISTENCE_DATA_PATH: "./data"
+      ENABLE_MODULES: text2vec-transformers
+      DEFAULT_VECTORIZER_MODULE: text2vec-transformers
+      TRANSFORMERS_INFERENCE_API: http://t2v-transformers:8080
+      CLUSTER_HOSTNAME: 'node1'
+
+    healthcheck:
+      test: wget --no-verbose --tries=3 --spider http://localhost:8080/v1/.well-known/ready || exit 1
+      interval: 5s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+    depends_on:
+      - t2v-transformers
+
+  t2v-transformers:
+    image: semitechnologies/transformers-inference:sentence-transformers-multi-qa-MiniLM-L6-cos-v1
+    environment:
+      ENABLE_CUDA: 0  # set to 1 to enable
+
+  populate-db:
+    build: .
+    command: python -m testtask.populate_db
+    environment:
+      WEAVIATE_HOST: weaviate
+    depends_on:
+      weaviate:
+        condition: service_healthy
+
+  api:
+    build: .
+    command: uvicorn testtask.api:app --host 0.0.0.0
+    environment:
+      WEAVIATE_HOST: weaviate
+    ports:
+      - "8000:8000"
+    depends_on:
+      weaviate:
+        condition: service_healthy
+      populate-db:
+        condition: service_completed_successfully
+
+
